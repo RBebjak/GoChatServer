@@ -16,14 +16,13 @@ type Message struct {
 }
 
 func main() {
-	if len(os.Args) < 4 {
-		fmt.Println("Usage: go run client.go <server:port> <username> <room>")
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go run client.go <server:port> <username>")
 		return
 	}
 
 	addr := os.Args[1]
 	username := os.Args[2]
-	room := os.Args[3]
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -38,54 +37,68 @@ func main() {
 	fmt.Fprintf(conn, "%s\n", username)
 	fmt.Println(readLine(reader))
 
-	// Send room
-	fmt.Fprintf(conn, "%s\n", room)
-	fmt.Println(readLine(reader))
-
-	// Channel to stop fetch goroutine
-	stopFetch := make(chan struct{})
-
-	go func() {
-		lastSeen := 0
-		for {
-			select {
-			case <-stopFetch:
-				return
-			case <-time.After(2 * time.Second):
-				// send /fetch
-				fmt.Fprintf(conn, "/fetch\n")
-				line := readLine(reader)
-				var resp struct {
-					Messages []Message `json:"messages"`
-				}
-				if err := json.Unmarshal([]byte(line), &resp); err == nil {
-					for _, msg := range resp.Messages {
-						fmt.Printf("[%s] %s\n", msg.User, msg.Message)
-					}
-				}
-				lastSeen++ // we are only fetching; server handles lastSeen per connection
-			}
-		}
-	}()
-
-	// Read user input from console
 	console := bufio.NewScanner(os.Stdin)
 	for console.Scan() {
-		text := strings.TrimSpace(console.Text())
-		if text == "" {
+		room := strings.TrimSpace(console.Text())
+
+		if room == "exit" {
+			fmt.Printf("{Cant use %s as name of room}\n", room)
 			continue
 		}
-
-		fmt.Fprintf(conn, "%s\n", text)
-
-		// Stop fetch goroutine if client exits room or logs out
-		if text == "exit" || text == "logout" {
-			close(stopFetch)
-			break
+		if room == "logout" {
+			return
 		}
 
-		// Print server response
+		// Send room
+		fmt.Fprintf(conn, "%s\n", room)
 		fmt.Println(readLine(reader))
+
+		stopFetch := make(chan struct{})
+
+		go func() {
+			for {
+				select {
+				case <-stopFetch:
+					return
+				case <-time.After(2 * time.Second):
+					fmt.Fprintf(conn, "/fetch\n")
+					line := readLine(reader)
+					var resp struct {
+						Messages []Message `json:"messages"`
+					}
+					if err := json.Unmarshal([]byte(line), &resp); err == nil {
+						for _, msg := range resp.Messages {
+							fmt.Printf("[%s] %s\n", msg.User, msg.Message)
+						}
+					}
+				}
+			}
+		}()
+
+		// Read user input from console
+		for room != "" && console.Scan() {
+			text := strings.TrimSpace(console.Text())
+			if text == "" {
+				continue
+			}
+
+			fmt.Fprintf(conn, "%s\n", text)
+
+			if text == "exit" {
+				close(stopFetch)
+				room = ""
+				fmt.Println(readLine(reader))
+				break
+			}
+
+			if text == "logout" {
+				close(stopFetch)
+				return
+			}
+
+			// Print server response
+			fmt.Println(readLine(reader))
+		}
 	}
 }
 

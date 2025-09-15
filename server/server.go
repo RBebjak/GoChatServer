@@ -115,14 +115,12 @@ func handleConnection(conn net.Conn) {
 
 		default:
 			if chatLog == nil {
-				// Treat as room name to join
 				room := line
 				chatLog = getLog(room)
 				currentRoom = room
 				lastSeen = 0
 				fmt.Fprintf(conn, "{\"status\":\"joined room %s\"}\n", room)
 			} else {
-				// Normal message
 				chatLog.addMessage(user, line)
 				fmt.Fprintf(conn, "{\"status\":\"sent\"}\n")
 			}
